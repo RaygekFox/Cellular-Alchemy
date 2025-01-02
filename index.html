@@ -1,0 +1,1204 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Cellular Alchemy</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: Arial, sans-serif;
+            background: #1a1a1a;
+            color: #fff;
+        }
+
+        #top-menu {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 50px;
+            background: #2d2d2d;
+            color: white;
+            display: flex;
+            align-items: center;
+            padding: 0 20px;
+            gap: 20px;
+        }
+
+        #canvas {
+            position: absolute;
+            top: 50px;
+            left: 0;
+            right: 0;
+            bottom: 0;
+        }
+
+        .button {
+            padding: 8px 16px;
+            background: #444;
+            border: none;
+            color: white;
+            cursor: pointer;
+            border-radius: 4px;
+        }
+
+        .button:hover {
+            background: #555;
+        }
+
+        #speed-slider {
+            width: 100px;
+        }
+
+        #board-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.9);
+            z-index: 100;
+        }
+
+        #board {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: #2d2d2d;
+            padding: 20px;
+            border-radius: 8px;
+            min-width: 800px;
+            max-width: 90vw;
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+
+        .row {
+            display: flex;
+            margin: 10px 0;
+            gap: 20px;
+            align-items: flex-start;
+        }
+
+        .section {
+            background: #363636;
+            border-radius: 4px;
+            padding: 15px;
+            margin: 5px;
+            display: flex;
+            gap: 5px;
+            align-items: flex-start;
+        }
+
+        /* Type section (first section in each row) */
+        .section:first-child {
+            width: 100px;  /* Fixed width instead of flex */
+            flex: none;    /* Remove flex growth/shrink */
+        }
+
+        /* Birth and Survival sections */
+        .section:not(:first-child) {
+            flex: 1;       /* Equal flex for the rule sections */
+        }
+
+        .section > div:first-child {
+            margin-bottom: 10px;
+            font-weight: bold;
+            color: #ddd;
+            width: 100%;
+        }
+
+        .column {
+            flex: 1;
+            min-width: 20px;
+            height: 120px;
+            border: 2px solid #555;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 5px;
+            background: #2d2d2d;
+            justify-content: flex-start;
+        }
+
+        .circle {
+            width: 40px;
+            height: 40px;
+            min-width: 40px;
+            min-height: 40px;
+            border: 2px solid #555;
+            border-radius: 50%;
+            margin: 5px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #2d2d2d;
+            flex-shrink: 0;
+        }
+
+        .stone {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            margin: 2px;
+            cursor: pointer;
+        }
+
+        .stone.yellow { background: #ffd700; }
+        .stone.green { background: #32cd32; }
+        .stone.blue { background: #1e90ff; }
+        .stone.red { background: #dc143c; }
+        .stone.purple { background: #9370db; }
+        .stone.orange { background: #ffa500; }
+
+        #bag {
+            position: fixed;
+            right: 20px;
+            bottom: 20px;
+            width: 60px;
+            height: 60px;
+            background: #363636;
+            border-radius: 8px;
+            color: white;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .available-stone {
+            cursor: pointer;
+        }
+        .available-stone.selected {
+            border: 2px solid white;
+            box-shadow: 0 0 10px rgba(255,255,255,0.5);
+        }
+        .stone {
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <div id="top-menu">
+        <button id="next-gen" class="button">Next Generation</button>
+        <button id="autoplay" class="button">Autoplay</button>
+        <input type="range" id="speed-slider" min="100" max="2000" value="1000">
+        <div id="stone-counts"></div>
+        <div class="button" id="menu-btn">Menu</div>
+        <button id="reset" class="button">Reset</button>
+    </div>
+
+    <canvas id="canvas"></canvas>
+
+    <div id="board-overlay">
+        <div id="board"></div>
+    </div>
+
+    <div id="bag">
+        <div>Bag</div>
+        <div id="bag-count">0</div>
+    </div>
+
+    <script>
+        // TODO List:
+        // 1. Implement helper functions:
+        //    - arraysEqual()
+        //    - getColorClass()
+        //    - setupDragAndDrop()
+        //    - handleDragStart()
+        //    - handleDrop()
+        //    - updateBagCount()
+        // 2. Implement game state management:
+        //    - saveGameState()
+        //    - loadGameState()
+        // 3. Add zoom and pan controls
+        // 4. Add menu functionality
+        // 5. Implement stone collection animation
+        // 6. Add visual feedback for autoplay state
+
+        // Global variables
+        let isAutoplay = false;
+        let autoPlayInterval = 1000;
+        let activeChunk = null; // Will store the coordinates of the chunk being edited
+        let bagOfStones = [];
+        let chunks = [];
+        let canvas, ctx;
+        let cameraOffset = { x: window.innerWidth/2, y: window.innerHeight/2 };
+        let cameraZoom = 1;
+        let MAX_ZOOM = 5;
+        let MIN_ZOOM = 0.1;
+        let SCROLL_SENSITIVITY = 0.0005;
+        let isDragging = false;
+        let dragStart = { x: 0, y: 0 };
+        let dragStartTime = 0;
+        let lastDragPosition = { x: 0, y: 0 };
+        const DRAG_THRESHOLD = 5; // pixels
+        const CLICK_THRESHOLD = 200; // milliseconds
+        let mouseDownPos = { x: 0, y: 0 };
+        const CLICK_DISTANCE_THRESHOLD = 5; // pixels
+        let activeStone = null;
+        
+        // Initialize canvas
+        canvas = document.getElementById('canvas');
+        ctx = canvas.getContext('2d');
+        
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight - 50;
+        }
+        
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        // Disable page zoom
+        document.addEventListener('wheel', (e) => {
+            if(e.ctrlKey) {
+                e.preventDefault();
+            }
+        }, {passive: false});
+
+        // Initialize game state with proper checks
+        let gameState = localStorage.getItem('gameState');
+        if (!gameState) {  // Simplified check - if no gameState, initialize
+            // Clear any existing invalid state
+            chunks = [];
+            bagOfStones = [];
+            let firstChunk = createChunk([0,0]); // Create first chunk
+
+            // Initialize the first chunk with random cells and rules
+            for (let i = 0; i < 32; i++) {
+                for (let j = 0; j < 32; j++) {
+                    if (Math.random() < 0.5) {  // 50% chance
+                        firstChunk.grid[i][j] = 1;   // Type 1 (yellow) cells
+                    }
+                }
+            }
+
+            // Set up initial rules for type 1 cells
+            firstChunk.board.rows[0].type = 1;
+            firstChunk.board.rows[0].B[0] = [1,1,1]; // Born if exactly 3 neighbors
+            firstChunk.board.rows[0].S[0] = [1,1];   // Survive if 2 neighbors
+            firstChunk.board.rows[0].S[1] = [1,1,1]; // Survive if 3 neighbors
+            firstChunk.isAlive = true;
+
+            chunks.push(firstChunk);  // Add it to the chunks array
+            localStorage.setItem('gameState', JSON.stringify({
+                chunks: chunks,
+                bagOfStones: bagOfStones
+            }));
+        } else {
+            try {
+                gameState = JSON.parse(gameState);
+                chunks = gameState.chunks;
+                bagOfStones = gameState.bagOfStones;
+            } catch (e) {
+                // If there's any error parsing, reinitialize
+                chunks = [];
+                bagOfStones = [];
+                let firstChunk = createChunk([0,0]);
+
+                // Initialize the first chunk with random cells and rules
+                for (let i = 0; i < 32; i++) {
+                    for (let j = 0; j < 32; j++) {
+                        if (Math.random() < 0.5) {  // 50% chance
+                            firstChunk.grid[i][j] = 1;   // Type 1 (yellow) cells
+                        }
+                    }
+                }
+
+                // Set up initial rules for type 1 cells
+                firstChunk.board.rows[0].type = 1;
+                firstChunk.board.rows[0].B[0] = [1,1,1]; // Born if exactly 3 neighbors
+                firstChunk.board.rows[0].S[0] = [1,1];   // Survive if 2 neighbors
+                firstChunk.board.rows[0].S[1] = [1,1,1]; // Survive if 3 neighbors
+                firstChunk.isAlive = true;
+
+                chunks.push(firstChunk);
+                localStorage.setItem('gameState', JSON.stringify({
+                    chunks: chunks,
+                    bagOfStones: bagOfStones
+                }));
+            }
+        }
+
+        // Event listeners
+        document.getElementById('next-gen').addEventListener('click', nextGeneration);
+        
+        document.getElementById('autoplay').addEventListener('click', () => {
+            isAutoplay = !isAutoplay;
+            if(isAutoplay) {
+                setInterval(nextGeneration, autoPlayInterval);
+            }
+        });
+
+        document.getElementById('speed-slider').addEventListener('input', (e) => {
+            autoPlayInterval = parseInt(e.target.value);
+        });
+
+        // Functions will be implemented here
+        function nextGeneration() {
+            chunks.forEach(chunk => {
+                if(chunk.isAlive) {
+                    updateGrid(chunk);
+                    ensureNeighboringChunks(chunk);
+                }
+            });
+            drawWorld();
+            saveGameState();
+        }
+
+        function updateGrid(chunk) {
+            // Create a single temporary grid
+            let newGrid = Array(32).fill().map(() => Array(32).fill(0));
+
+            chunk.board.rows.forEach((row, rowIndex) => {
+                if (row.type !== null) {
+                    for (let i = 0; i < 32; i++) {
+                        for (let j = 0; j < 32; j++) {
+                            let neighbors = checkNeighbors(chunk, i, j, row.type);
+                            neighbors.sort();  // Sort neighbors array
+                            
+                            // If no neighbors, cell dies or stays dead
+                            if (neighbors.length === 0) {
+                                newGrid[i][j] = 0;
+                                continue;
+                            }
+                            
+                            // Check birth rules
+                            if (chunk.grid[i][j] === 0) {
+                                if (row.B.some(rule => arraysEqual(rule, neighbors))) {
+                                    newGrid[i][j] = row.type;
+                                }
+                            }
+                            // Check survival rules
+                            else if (chunk.grid[i][j] === row.type) {
+                                if (row.S.some(rule => arraysEqual(rule, neighbors))) {
+                                    newGrid[i][j] = row.type;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+
+            // Update grid
+            chunk.grid = newGrid;
+
+            // Check for stones to collect after grid update
+            for (let i = chunk.stones.length - 1; i >= 0; i--) {
+                const stone = chunk.stones[i];
+                if (newGrid[stone[1]][stone[2]] !== 0) {  // If there's a live cell at stone's position
+                    bagOfStones.push(stone[0]);  // Add stone to bag
+                    chunk.stones.splice(i, 1);   // Remove stone from chunk
+                }
+            }
+
+            // Update bag count
+            updateBagCount();   
+        }
+
+        function checkNeighbors(chunk, i, j, type) {
+            let neighbors = [];
+            const directions = [
+                [-1,-1], [-1,0], [-1,1],
+                [0,-1],          [0,1],
+                [1,-1],  [1,0],  [1,1]
+            ];
+
+            for (let [dx, dy] of directions) {
+                let newI = i + dx;
+                let newJ = j + dy;
+                
+                // Check if we need to look in neighboring chunk
+                let targetChunk = chunk;
+                let checkI = newI;
+                let checkJ = newJ;
+                
+                // Going off left or right edge (i is x coordinate)
+                if (newI < 0) {
+                    targetChunk = getChunk([chunk.coord[0] - 1, chunk.coord[1]]);  // Move left
+                    checkI = 31;
+                } else if (newI > 31) {
+                    targetChunk = getChunk([chunk.coord[0] + 1, chunk.coord[1]]);  // Move right
+                    checkI = 0;
+                }
+                
+                // Going off top or bottom edge (j is y coordinate)
+                if (newJ < 0) {
+                    targetChunk = getChunk([chunk.coord[0], chunk.coord[1] - 1]);  // Move up
+                    checkJ = 31;
+                } else if (newJ > 31) {
+                    targetChunk = getChunk([chunk.coord[0], chunk.coord[1] + 1]);  // Move down
+                    checkJ = 0;
+                }
+
+                // Handle diagonal neighbors
+                if (newI < 0 && newJ < 0) {
+                    targetChunk = getChunk([chunk.coord[0] - 1, chunk.coord[1] - 1]);  // Up-left
+                    checkI = 31;
+                    checkJ = 31;
+                } else if (newI < 0 && newJ > 31) {
+                    targetChunk = getChunk([chunk.coord[0] - 1, chunk.coord[1] + 1]);  // Down-left
+                    checkI = 31;
+                    checkJ = 0;
+                } else if (newI > 31 && newJ < 0) {
+                    targetChunk = getChunk([chunk.coord[0] + 1, chunk.coord[1] - 1]);  // Up-right
+                    checkI = 0;
+                    checkJ = 31;
+                } else if (newI > 31 && newJ > 31) {
+                    targetChunk = getChunk([chunk.coord[0] + 1, chunk.coord[1] + 1]);  // Down-right
+                    checkI = 0;
+                    checkJ = 0;
+                }
+
+                if (targetChunk && targetChunk.grid[checkI][checkJ] === type) {
+                    neighbors.push(type);
+                }
+            }
+
+            return neighbors.sort();
+        }
+
+        function ensureNeighboringChunks(chunk) {
+            const neighbors = [
+                [-1,-1], [-1,0], [-1,1],
+                [0,-1],          [0,1],
+                [1,-1],  [1,0],  [1,1]
+            ];
+
+            neighbors.forEach(([dx, dy]) => {
+                let newCoord = [chunk.coord[0] + dx, chunk.coord[1] + dy];
+                if (!getChunk(newCoord)) {
+                    let newChunk = createChunk(newCoord);
+                    chunks.push(newChunk);  // Add the new chunk to the chunks array
+                }
+            });
+        }
+
+        function createChunk(coord) {
+            let chunk = {
+                coord: coord,
+                isAlive: false,
+                board: {
+                    rows: Array(3).fill().map(() => ({
+                        type: null,
+                        B: Array(9).fill().map(() => []),  // Initialize 9 empty arrays
+                        S: Array(9).fill().map(() => [])   // Initialize 9 empty arrays
+                    }))
+                },
+                grid: Array(32).fill().map(() => Array(32).fill(0)),  // Single 32x32 grid
+                stones: []
+            };
+
+            // Add 10 random stones of type 1
+            // Calculate distance from origin chunk [0,0]
+            let distance = Math.floor(Math.sqrt(coord[0] * coord[0] + coord[1] * coord[1]));
+            for (let i = 0; i < 10; i++) {
+                let x, y;
+                do {
+                    x = Math.floor(Math.random() * 32);
+                    y = Math.floor(Math.random() * 32);
+                } while (chunk.grid[x][y] !== 0 || 
+                        chunk.stones.some(s => s[1] === x && s[2] === y));
+                
+                chunk.stones.push([1, x, y]);
+            }
+
+            return chunk;
+        }
+
+        function getChunk(coord) {
+            return chunks.find(c => 
+                c.coord[0] === coord[0] && c.coord[1] === coord[1]
+            );
+        }
+
+        function showBoard(chunk) {
+            // Store active chunk coordinates at the start
+            activeChunk = chunk.coord;
+            
+            console.log('Opening board for chunk:', chunk.coord);
+            
+            const overlay = document.getElementById('board-overlay');
+            const board = document.getElementById('board');
+            board.innerHTML = '';
+            overlay.style.display = 'block';
+
+            // Add close button
+            const closeButton = document.createElement('button');
+            closeButton.className = 'button';
+            closeButton.style.position = 'absolute';
+            closeButton.style.top = '10px';
+            closeButton.style.right = '10px';
+            closeButton.textContent = 'Close';
+            closeButton.onclick = () => {
+                overlay.style.display = 'none';
+                saveGameState();
+            };
+            board.appendChild(closeButton);
+
+            // Create rows
+            for (let i = 0; i < 3; i++) {
+                const row = document.createElement('div');
+                row.className = 'row';
+
+                // Type section
+                const typeSection = document.createElement('div');
+                typeSection.className = 'section';
+                typeSection.innerHTML = '<div>Type:</div>';
+                const typeCircle = document.createElement('div');
+                typeCircle.className = 'circle';
+                if (chunk.board.rows[i].type) {
+                    typeCircle.appendChild(createStone(chunk.board.rows[i].type));
+                }
+                typeSection.appendChild(typeCircle);
+
+                // Birth rules section
+                const birthSection = document.createElement('div');
+                birthSection.className = 'section';
+                birthSection.innerHTML = '<div>Birth Rules:</div>';
+                for (let j = 0; j < 9; j++) {
+                    const column = document.createElement('div');
+                    column.className = 'column';
+                    if (chunk.board.rows[i].B[j] && chunk.board.rows[i].B[j].length > 0) {
+                        chunk.board.rows[i].B[j].forEach(stoneType => {
+                            const stone = createStone(stoneType);
+                            column.appendChild(stone);
+                        });
+                    }
+                    birthSection.appendChild(column);
+                }
+
+                // Survival rules section
+                const survivalSection = document.createElement('div');
+                survivalSection.className = 'section';
+                survivalSection.innerHTML = '<div>Survival Rules:</div>';
+                for (let j = 0; j < 9; j++) {
+                    const column = document.createElement('div');
+                    column.className = 'column';
+                    if (chunk.board.rows[i].S[j] && chunk.board.rows[i].S[j].length > 0) {
+                        chunk.board.rows[i].S[j].forEach(stoneType => {
+                            const stone = createStone(stoneType);
+                            column.appendChild(stone);
+                        });
+                    }
+                    survivalSection.appendChild(column);
+                }
+
+                row.appendChild(typeSection);
+                row.appendChild(birthSection);
+                row.appendChild(survivalSection);
+                board.appendChild(row);
+            }
+
+            // Add bag display
+            const bagDisplay = document.createElement('div');
+            bagDisplay.className = 'section';
+            bagDisplay.innerHTML = '<div>Available Stones:</div>';
+            bagDisplay.style.marginTop = '20px';
+            
+            // Group stones by type and show count
+            const stoneCounts = {};
+            bagOfStones.forEach(type => {
+                stoneCounts[type] = (stoneCounts[type] || 0) + 1;
+            });
+            
+            Object.entries(stoneCounts).forEach(([type, count]) => {
+                const stoneDisplay = document.createElement('div');
+                stoneDisplay.style.display = 'inline-block';
+                stoneDisplay.style.margin = '5px';
+                stoneDisplay.appendChild(createStone(parseInt(type)));
+                stoneDisplay.appendChild(document.createTextNode(` x${count}`));
+                bagDisplay.appendChild(stoneDisplay);
+            });
+            
+            board.appendChild(bagDisplay);
+
+            updateBagCount();
+            initializeBoardStones();
+        }
+
+        // Helper functions
+        function createCircle() {
+            const column = document.createElement('div');
+            column.className = 'column';
+            return column;
+        }
+
+        function createStone(type) {
+            const stone = document.createElement('div');
+            stone.className = 'stone';
+            stone.style.backgroundColor = getColorForType(type);
+            stone.dataset.type = type;
+            return stone;
+        }
+
+        function createRuleSection(type, rules) {
+            const section = document.createElement('div');
+            section.className = 'section';
+            for (let i = 0; i < 9; i++) {
+                section.appendChild(createCircle());
+            }
+            return section;
+        }
+
+        function drawWorld() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Save the current transform state
+            ctx.save();
+            
+            // Move to the center of the screen
+            ctx.translate(cameraOffset.x, cameraOffset.y);
+            
+            // Scale based on zoom
+            ctx.scale(cameraZoom, cameraZoom);
+            
+            const chunkSize = 32;
+            const cellSize = 20;
+            
+            // Calculate visible area in world coordinates
+            const visibleArea = {
+                left: (-cameraOffset.x / cameraZoom) - cellSize,
+                right: (canvas.width - cameraOffset.x) / cameraZoom + cellSize,
+                top: (-cameraOffset.y / cameraZoom) - cellSize,
+                bottom: (canvas.height - cameraOffset.y) / cameraZoom + cellSize
+            };
+            
+            // Draw only visible chunks
+            chunks.forEach(chunk => {
+                const chunkX = chunk.coord[0] * chunkSize * cellSize;
+                const chunkY = chunk.coord[1] * chunkSize * cellSize;
+                
+                // Check if chunk is in visible area
+                if (chunkX + chunkSize * cellSize > visibleArea.left && 
+                    chunkX < visibleArea.right &&
+                    chunkY + chunkSize * cellSize > visibleArea.top && 
+                    chunkY < visibleArea.bottom) {
+                    drawChunk(chunk, chunkX, chunkY, cellSize);
+                }
+            });
+            
+            // Restore the transform state
+            ctx.restore();
+        }
+
+        function drawChunk(chunk, offsetX, offsetY) {
+            const cellSize = 20;
+            const chunkSize = 32;
+
+            // Draw chunk border - make it white and thicker
+            ctx.strokeStyle = '#fff';  // White color for chunk border
+            ctx.lineWidth = 2;
+            ctx.strokeRect(
+                offsetX,
+                offsetY,
+                chunkSize * cellSize,
+                chunkSize * cellSize
+            );
+
+            // Draw cells and grid
+            for (let i = 0; i < chunkSize; i++) {
+                for (let j = 0; j < chunkSize; j++) {
+                    const cellValue = chunk.grid[i][j];
+                    
+                    // Draw cell background
+                    if (cellValue !== 0) {  // If cell is alive
+                        ctx.fillStyle = getColorForType(cellValue);
+                    } else {  // If cell is dead
+                        ctx.fillStyle = '#1a1a1a';
+                    }
+                    ctx.fillRect(
+                        offsetX + i * cellSize,
+                        offsetY + j * cellSize,
+                        cellSize - 1,
+                        cellSize - 1
+                    );
+
+                    // Draw cell border
+                    ctx.strokeStyle = '#333';  // Darker grey for cell borders
+                    ctx.lineWidth = 1;
+                    ctx.strokeRect(
+                        offsetX + i * cellSize,
+                        offsetY + j * cellSize,
+                        cellSize - 1,
+                        cellSize - 1
+                    );
+                }
+            }
+
+            // Draw stones
+            chunk.stones.forEach(stone => {
+                ctx.fillStyle = getColorForType(stone[0]);
+                ctx.beginPath();
+                ctx.arc(
+                    offsetX + stone[1] * cellSize + cellSize/2,
+                    offsetY + stone[2] * cellSize + cellSize/2,
+                    cellSize/3,
+                    0,
+                    Math.PI * 2
+                );
+                ctx.fill();
+            });
+        }
+
+        function getColorForType(type) {
+            const colors = {
+                1: '#ffd700', // yellow
+                2: '#32cd32', // green
+                3: '#1e90ff', // blue
+                4: '#dc143c', // red
+                5: '#9370db', // purple
+                6: '#ffa500'  // orange
+            };
+            return colors[type] || '#333';  // Return gray for unknown types
+        }
+
+        function arraysEqual(a, b) {
+            if (a.length !== b.length) return false;
+            for (let i = 0; i < a.length; i++) {
+                if (a[i] !== b[i]) return false;
+            }
+            return true;
+        }
+
+        function getColorClass(type) {
+            const colors = {
+                1: 'yellow',
+                2: 'green',
+                3: 'blue',
+                4: 'red',
+                5: 'purple',
+                6: 'orange'
+            };
+            return colors[type] || '';
+        }
+
+        function saveGameState() {
+            console.log('Saving state. All chunks:', chunks);
+            localStorage.setItem('gameState', JSON.stringify({
+                chunks: chunks,
+                bagOfStones: bagOfStones
+            }));
+            
+            // Verify save
+            const savedState = JSON.parse(localStorage.getItem('gameState'));
+            console.log('Verified saved state:', savedState);
+        }
+
+        function getChunkAtCoordinates(x, y) {
+            const coords = getChunkCoordinates(x, y);
+            return getChunk(coords);
+        }
+
+        // Initial draw
+        drawWorld();
+
+        function updateBagCount() {
+            const bagCountElement = document.getElementById('bag-count');
+            if (bagCountElement) {
+                // Clear existing content
+                bagCountElement.innerHTML = '';
+                
+                // Count stones by type
+                const stoneCounts = {};
+                bagOfStones.forEach(type => {
+                    stoneCounts[type] = (stoneCounts[type] || 0) + 1;
+                });
+                
+                // Create colored number spans for each stone type
+                Object.entries(stoneCounts).forEach(([type, count]) => {
+                    if (count > 0) {
+                        const countSpan = document.createElement('div');
+                        countSpan.style.color = getColorForType(parseInt(type));
+                        countSpan.style.margin = '2px';
+                        countSpan.textContent = count;
+                        bagCountElement.appendChild(countSpan);
+                    }
+                });
+            }
+        }
+
+        // Add these event listeners after canvas initialization
+        canvas.addEventListener('mousedown', onPointerDown);
+        canvas.addEventListener('mouseup', onPointerUp);
+        canvas.addEventListener('mousemove', onPointerMove);
+        canvas.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            const zoom = 1 - e.deltaY * SCROLL_SENSITIVITY;
+            
+            // Get mouse position relative to canvas
+            const rect = canvas.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            const mouseY = e.clientY - rect.top;
+
+            // Get the world position of mouse before zoom
+            const worldX = (mouseX - cameraOffset.x) / cameraZoom;
+            const worldY = (mouseY - cameraOffset.y) / cameraZoom;
+
+            // Apply zoom
+            cameraZoom *= zoom;
+            cameraZoom = Math.min(Math.max(cameraZoom, MIN_ZOOM), MAX_ZOOM);
+
+            // Get the new world position of mouse
+            const newWorldX = (mouseX - cameraOffset.x) / cameraZoom;
+            const newWorldY = (mouseY - cameraOffset.y) / cameraZoom;
+
+            // Adjust offset to keep mouse position fixed
+            cameraOffset.x += (newWorldX - worldX) * cameraZoom;
+            cameraOffset.y += (newWorldY - worldY) * cameraZoom;
+
+            drawWorld();
+        });
+
+        function onPointerDown(e) {
+            isDragging = true;
+            dragStart.x = e.clientX - cameraOffset.x;
+            dragStart.y = e.clientY - cameraOffset.y;
+            mouseDownPos.x = e.clientX;
+            mouseDownPos.y = e.clientY;
+            console.log('Mouse Down at:', mouseDownPos);
+        }
+
+        function onPointerUp(e) {
+            isDragging = false;
+            
+            // Calculate total distance moved
+            const dx = Math.abs(e.clientX - mouseDownPos.x);
+            const dy = Math.abs(e.clientY - mouseDownPos.y);
+            const movedDistance = Math.sqrt(dx * dx + dy * dy);
+
+            console.log('Mouse Up at:', { x: e.clientX, y: e.clientY });
+            console.log('Total distance moved:', movedDistance);
+            console.log('Is this a click?', movedDistance < CLICK_DISTANCE_THRESHOLD);
+
+            // If barely moved, treat as a click
+            if (movedDistance < CLICK_DISTANCE_THRESHOLD) {
+                const rect = canvas.getBoundingClientRect();
+                const mouseX = e.clientX - rect.left;
+                const mouseY = e.clientY - rect.top;
+                
+                // Convert screen coordinates to world coordinates
+                const worldX = (mouseX - cameraOffset.x) / cameraZoom;
+                const worldY = (mouseY - cameraOffset.y) / cameraZoom;
+                
+                console.log('Converting to world coordinates:', { worldX, worldY });
+                
+                const chunkCoords = getChunkCoordinates(worldX, worldY);
+                console.log('Chunk coordinates:', chunkCoords);
+                
+                const chunk = getChunk(chunkCoords);
+                console.log('Found chunk:', chunk ? 'yes' : 'no');
+                
+                if (chunk) {
+                    console.log('Opening board for chunk:', chunk.coord);
+                    isAutoplay = false;
+                    showBoard(chunk);
+                }
+            }
+        }
+
+        function onPointerMove(e) {
+            if (isDragging) {
+                cameraOffset.x = e.clientX - dragStart.x;
+                cameraOffset.y = e.clientY - dragStart.y;
+                drawWorld();
+            }
+        }
+
+        // Helper function to get chunk coordinates
+        function getChunkCoordinates(x, y) {
+            const chunkSize = 32;
+            const cellSize = 20;
+            
+            const chunkX = Math.floor(x / (chunkSize * cellSize));
+            const chunkY = Math.floor(y / (chunkSize * cellSize));
+            
+            return [chunkX, chunkY];
+        }
+
+        function getStoneType(stone) {
+            if (stone.classList.contains('yellow')) return 1;
+            if (stone.classList.contains('green')) return 2;
+            if (stone.classList.contains('blue')) return 3;
+            if (stone.classList.contains('red')) return 4;
+            if (stone.classList.contains('purple')) return 5;
+            if (stone.classList.contains('orange')) return 6;
+            return 0;
+        }
+
+        function renderBoard(chunk) {
+            // Clear all columns
+            document.querySelectorAll('.column, .circle').forEach(column => {
+                while (column.firstChild) {
+                    column.firstChild.remove();
+                }
+            });
+
+            // Render based on the rules
+            chunk.board.rows.forEach((row, rowIndex) => {
+                // Render type
+                if (row.type) {
+                    const typeCircle = document.querySelector(`.row:nth-child(${rowIndex + 2}) .circle`);
+                    if (typeCircle) {
+                        const stone = createStone(row.type);
+                        typeCircle.appendChild(stone);
+                    }
+                }
+
+                // Get all columns for Birth and Survival sections
+                const birthColumns = document.querySelectorAll(
+                    `.row:nth-child(${rowIndex + 2}) .section:nth-child(2) .column`
+                );
+                const survivalColumns = document.querySelectorAll(
+                    `.row:nth-child(${rowIndex + 2}) .section:nth-child(3) .column`
+                );
+
+                // Render Birth rules
+                birthColumns.forEach((column, columnIndex) => {
+                    const columnArray = row.B[columnIndex];
+                    if (columnArray && columnArray.length > 0) {
+                        columnArray.forEach(type => {
+                            const stone = createStone(type);
+                            column.appendChild(stone);
+                        });
+                    }
+                });
+
+                // Render Survival rules
+                survivalColumns.forEach((column, columnIndex) => {
+                    const columnArray = row.S[columnIndex];
+                    if (columnArray && columnArray.length > 0) {
+                        columnArray.forEach(type => {
+                            const stone = createStone(type);
+                            column.appendChild(stone);
+                        });
+                    }
+                });
+            });
+        }
+
+        // Add reset button functionality
+        document.getElementById('reset').addEventListener('click', () => {
+            if (confirm('Are you sure you want to reset? This will clear all progress.')) {
+                localStorage.clear();
+                location.reload();
+            }
+        });
+
+        // Add new function to handle stone selection
+        function handleStoneSelection(e) {
+            console.log('handleStoneSelection called');
+            const stone = e.target;
+            const stoneType = parseInt(stone.dataset.type);
+            activeStone = stoneType;
+            
+            // Visual feedback
+            document.querySelectorAll('.available-stone').forEach(s => {
+                s.classList.remove('selected');
+            });
+            stone.classList.add('selected');
+            
+            console.log('Selected stone type:', stoneType);
+        }
+
+        // Add new function to handle board clicks
+        function handleBoardClick(e) {
+            console.log('Board clicked', e.target);
+            const target = e.target;
+            const chunk = getChunk(activeChunk);
+            
+            // Handle stone removal
+            if (target.classList.contains('stone')) {
+                console.log('Removing stone');
+                const stoneType = parseInt(target.dataset.type);
+                bagOfStones.push(stoneType); // Add stone back to bag
+                
+                const row = target.closest('.row');
+                const rowIndex = Array.from(row.parentElement.children).indexOf(row) - 1;
+                
+                if (target.closest('.circle')) {
+                    // Handle type circle stone removal
+                    chunk.board.rows[rowIndex].type = null;
+                } else {
+                    // Handle rule column stone removal
+                    const section = target.closest('.section');
+                    const column = target.closest('.column');
+                    const columnIndex = Array.from(section.querySelectorAll('.column')).indexOf(column);
+                    const isBirthRule = section.firstElementChild.textContent.includes('Birth');
+                    
+                    const ruleArray = isBirthRule ? 
+                        chunk.board.rows[rowIndex].B[columnIndex] :
+                        chunk.board.rows[rowIndex].S[columnIndex];
+                    
+                    const typeIndex = ruleArray.indexOf(stoneType);
+                    if (typeIndex > -1) {
+                        ruleArray.splice(typeIndex, 1);
+                    }
+                }
+                
+                target.remove();
+                initializeBoardStones(); // Refresh available stones display
+            }
+            // Handle stone placement (for both columns and circles)
+            else if (activeStone !== null && (target.classList.contains('column') || target.classList.contains('circle'))) {
+                // Check if we have stones of this type in the bag
+                const bagIndex = bagOfStones.indexOf(activeStone);
+                if (bagIndex === -1) return; // No stones of this type available
+                
+                // Get row info
+                const row = target.closest('.row');
+                const rowIndex = Array.from(row.parentElement.children).indexOf(row) - 1;
+                
+                if (target.classList.contains('circle')) {
+                    // Handle type circle stone placement
+                    // Remove existing stone if there is one
+                    const existingStone = target.querySelector('.stone');
+                    if (existingStone) {
+                        bagOfStones.push(parseInt(existingStone.dataset.type));
+                        existingStone.remove();
+                    }
+                    
+                    // Set new type
+                    chunk.board.rows[rowIndex].type = activeStone;
+                    
+                    // Create and append the new stone
+                    const stone = createStone(activeStone);
+                    target.appendChild(stone);
+                    
+                    // Remove stone from bag
+                    bagOfStones.splice(bagIndex, 1);
+                } else {
+                    // Handle column stone placement
+                    const section = target.closest('.section');
+                    const columnIndex = Array.from(section.querySelectorAll('.column')).indexOf(target);
+                    const isBirthRule = section.firstElementChild.textContent.includes('Birth');
+                    
+                    // Get the correct rule array
+                    const ruleArray = isBirthRule ? 
+                        chunk.board.rows[rowIndex].B[columnIndex] : 
+                        chunk.board.rows[rowIndex].S[columnIndex];
+                    
+                    // Add stone to rules array
+                    ruleArray.push(activeStone);
+                    ruleArray.sort((a, b) => a - b);
+                    
+                    // Create and append the stone visually
+                    const stone = createStone(activeStone);
+                    target.appendChild(stone);
+                    
+                    // Remove stone from bag
+                    bagOfStones.splice(bagIndex, 1);
+                }
+                
+                chunk.isAlive = true;
+                ensureNeighboringChunks(chunk);
+                
+                // Update displays
+                initializeBoardStones();
+                saveGameState();
+                updateBagCount();
+                drawWorld();
+            }
+        }
+
+        // Add CSS if it doesn't exist
+        if (!document.querySelector('#game-styles')) {
+            const style = document.createElement('style');
+            style.id = 'game-styles';
+            style.textContent = `
+                .available-stone {
+                    cursor: pointer;
+                    transition: all 0.2s ease;
+                    margin: 5px;
+                    width: 20px;
+                    height: 20px;
+                    border-radius: 50%;
+                    display: inline-block;
+                    border: 2px solid transparent;
+                }
+                .available-stone.selected {
+                    border: 2px solid white;
+                    box-shadow: 0 0 10px rgba(255,255,255,0.5);
+                    transform: scale(1.1);
+                }
+                .stone {
+                    cursor: pointer;
+                }
+                .column, .circle {
+                    cursor: pointer;
+                }
+            `;
+            document.head.appendChild(style);
+        }
+
+        function initializeBoardStones() {
+            console.log('Initializing board stones...');
+            
+            // Find the section that contains "Available Stones:"
+            const sections = document.querySelectorAll('.section');
+            const availableStones = Array.from(sections).find(section => {
+                const div = section.querySelector('div');
+                return div && div.textContent.includes('Available Stones:');
+            });
+
+            if (!availableStones) {
+                console.error('Could not find Available Stones section');
+                return;
+            }
+            
+            console.log('Found available stones container:', availableStones);
+            
+            // Clear existing content except the header
+            const header = availableStones.querySelector('div:first-child');
+            availableStones.innerHTML = '';
+            availableStones.appendChild(header);
+            
+            // Count available stones by type
+            const stoneCounts = {};
+            bagOfStones.forEach(type => {
+                stoneCounts[type] = (stoneCounts[type] || 0) + 1;
+            });
+            
+            // Create clickable stones only for types that exist in the bag
+            Object.entries(stoneCounts).forEach(([type, count]) => {
+                const stoneDisplay = document.createElement('div');
+                stoneDisplay.style.display = 'inline-block';
+                stoneDisplay.style.margin = '5px';
+                
+                const stone = document.createElement('div');
+                stone.className = 'available-stone stone';
+                stone.style.backgroundColor = getColorForType(parseInt(type));
+                stone.dataset.type = type;
+                stone.addEventListener('click', (e) => {
+                    console.log('Stone clicked:', type);
+                    handleStoneSelection(e);
+                });
+                
+                // If this was the active stone type, keep it selected
+                if (activeStone === parseInt(type)) {
+                    stone.classList.add('selected');
+                }
+                
+                stoneDisplay.appendChild(stone);
+                
+                // Add count display
+                const countText = document.createTextNode(` x${count}`);
+                stoneDisplay.appendChild(countText);
+                
+                availableStones.appendChild(stoneDisplay);
+            });
+            
+            // Add click handler to the board
+            const board = document.getElementById('board');
+            if (board) {
+                board.removeEventListener('click', handleBoardClick);
+                board.addEventListener('click', handleBoardClick);
+                console.log('Board click handler attached');
+            }
+        }
+    </script>
+</body>
+</html>
