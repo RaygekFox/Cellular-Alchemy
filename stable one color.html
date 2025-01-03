@@ -184,7 +184,7 @@
     <div id="top-menu">
         <button id="next-gen" class="button">Next Generation</button>
         <button id="autoplay" class="button">Autoplay</button>
-        <input type="range" id="speed-slider" min="1" max="10" value="1">
+        <input type="range" id="speed-slider" min="100" max="2000" value="1000">
         <div id="stone-counts"></div>
         <div class="button" id="menu-btn">Menu</div>
         <button id="reset" class="button">Reset</button>
@@ -202,6 +202,21 @@
     </div>
 
     <script>
+        // TODO List:
+        // 1. Implement helper functions:
+        //    - arraysEqual()
+        //    - getColorClass()
+        //    - setupDragAndDrop()
+        //    - handleDragStart()
+        //    - handleDrop()
+        //    - updateBagCount()
+        // 2. Implement game state management:
+        //    - saveGameState()
+        //    - loadGameState()
+        // 3. Add zoom and pan controls
+        // 4. Add menu functionality
+        // 5. Implement stone collection animation
+        // 6. Add visual feedback for autoplay state
 
         // Global variables
         let isAutoplay = false;
@@ -224,8 +239,7 @@
         let mouseDownPos = { x: 0, y: 0 };
         const CLICK_DISTANCE_THRESHOLD = 5; // pixels
         let activeStone = null;
-        const chunkSize = 8;
-        let autoplayIntervalId = null;
+        
         // Initialize canvas
         canvas = document.getElementById('canvas');
         ctx = canvas.getContext('2d');
@@ -254,8 +268,8 @@
             let firstChunk = createChunk([0,0]); // Create first chunk
 
             // Initialize the first chunk with random cells and rules
-            for (let i = 0; i < chunkSize; i++) {
-                for (let j = 0; j < chunkSize; j++) {
+            for (let i = 0; i < 32; i++) {
+                for (let j = 0; j < 32; j++) {
                     if (Math.random() < 0.5) {  // 50% chance
                         firstChunk.grid[i][j] = 1;   // Type 1 (yellow) cells
                     }
@@ -286,8 +300,8 @@
                 let firstChunk = createChunk([0,0]);
 
                 // Initialize the first chunk with random cells and rules
-                for (let i = 0; i < chunkSize; i++) {
-                    for (let j = 0; j < chunkSize; j++) {
+                for (let i = 0; i < 32; i++) {
+                    for (let j = 0; j < 32; j++) {
                         if (Math.random() < 0.5) {  // 50% chance
                             firstChunk.grid[i][j] = 1;   // Type 1 (yellow) cells
                         }
@@ -315,93 +329,77 @@
         document.getElementById('autoplay').addEventListener('click', () => {
             isAutoplay = !isAutoplay;
             if(isAutoplay) {
-                autoplayIntervalId = setInterval(nextGeneration, autoPlayInterval);
-            }
-            else {
-                clearInterval(autoplayIntervalId);
-                autoplayIntervalId = null;
+                setInterval(nextGeneration, autoPlayInterval);
             }
         });
 
         document.getElementById('speed-slider').addEventListener('input', (e) => {
-            autoPlayInterval = Math.floor(1000 / parseInt(e.target.value));
-            // If autoplay is active, restart the interval with new speed
-            if(isAutoplay) {
-                clearInterval(autoplayIntervalId);
-                autoplayIntervalId = setInterval(nextGeneration, autoPlayInterval);
-            }
+            autoPlayInterval = parseInt(e.target.value);
         });
 
         // Functions will be implemented here
         function nextGeneration() {
             chunks.forEach(chunk => {
                 if(chunk.isAlive) {
-                    updateNewGrid(chunk);
+                    updateGrid(chunk);
                     ensureNeighboringChunks(chunk);
                 }
-            });
-            chunks.forEach(chunk => {
-                updateGrid(chunk);
             });
             drawWorld();
             saveGameState();
         }
 
-        function updateNewGrid(chunk) {
-            chunk.newGrid = Array(chunkSize).fill().map(() => Array(chunkSize).fill(0));
+        function updateGrid(chunk) {
+            // Create a single temporary grid
+            let newGrid = Array(32).fill().map(() => Array(32).fill(0));
 
             chunk.board.rows.forEach((row, rowIndex) => {
                 if (row.type !== null) {
-                    for (let i = 0; i < chunkSize; i++) {
-                        for (let j = 0; j < chunkSize; j++) {
-                            let neighbors = checkNeighbors(chunk, i, j);
+                    for (let i = 0; i < 32; i++) {
+                        for (let j = 0; j < 32; j++) {
+                            let neighbors = checkNeighbors(chunk, i, j, row.type);
                             neighbors.sort();  // Sort neighbors array
                             
                             // If no neighbors, cell dies or stays dead
                             if (neighbors.length === 0) {
-                                chunk.newGrid[i][j] = 0;
+                                newGrid[i][j] = 0;
                                 continue;
                             }
                             
                             // Check birth rules
                             if (chunk.grid[i][j] === 0) {
                                 if (row.B.some(rule => arraysEqual(rule, neighbors))) {
-                                    chunk.newGrid[i][j] = row.type;
+                                    newGrid[i][j] = row.type;
                                 }
-
                             }
                             // Check survival rules
                             else if (chunk.grid[i][j] === row.type) {
                                 if (row.S.some(rule => arraysEqual(rule, neighbors))) {
-                                    chunk.newGrid[i][j] = row.type;
+                                    newGrid[i][j] = row.type;
                                 }
                             }
                         }
                     }
                 }
             });
-        }
 
-        function updateGrid(chunk) {
             // Update grid
-            chunk.grid = chunk.newGrid;
-            console.log("chunk coord is " + chunk.coord);
-            console.log("chunk.grid is " + chunk.grid);
+            chunk.grid = newGrid;
 
             // Check for stones to collect after grid update
             for (let i = chunk.stones.length - 1; i >= 0; i--) {
                 const stone = chunk.stones[i];
-                if (chunk.newGrid[stone[1]][stone[2]] !== 0) {  // If there's a live cell at stone's position
+                if (newGrid[stone[1]][stone[2]] !== 0) {  // If there's a live cell at stone's position
                     bagOfStones.push(stone[0]);  // Add stone to bag
                     chunk.stones.splice(i, 1);   // Remove stone from chunk
                 }
             }
 
             // Update bag count
-            updateBagCount(); 
+            updateBagCount();   
         }
 
-        function checkNeighbors(chunk, i, j) {
+        function checkNeighbors(chunk, i, j, type) {
             let neighbors = [];
             const directions = [
                 [-1,-1], [-1,0], [-1,1],
@@ -418,43 +416,45 @@
                 let checkI = newI;
                 let checkJ = newJ;
                 
+                // Going off left or right edge (i is x coordinate)
                 if (newI < 0) {
-                    targetChunk = getChunk([chunk.coord[0] - 1, chunk.coord[1]]);
-                    checkI = chunkSize - 1;
-                } else if (newI > chunkSize - 1) {
-                    targetChunk = getChunk([chunk.coord[0] + 1, chunk.coord[1]]);
+                    targetChunk = getChunk([chunk.coord[0] - 1, chunk.coord[1]]);  // Move left
+                    checkI = 31;
+                } else if (newI > 31) {
+                    targetChunk = getChunk([chunk.coord[0] + 1, chunk.coord[1]]);  // Move right
                     checkI = 0;
                 }
                 
+                // Going off top or bottom edge (j is y coordinate)
                 if (newJ < 0) {
-                    targetChunk = getChunk([chunk.coord[0], chunk.coord[1] - 1]);
-                    checkJ = chunkSize - 1;
-                } else if (newJ > chunkSize - 1) {
-                    targetChunk = getChunk([chunk.coord[0], chunk.coord[1] + 1]);
+                    targetChunk = getChunk([chunk.coord[0], chunk.coord[1] - 1]);  // Move up
+                    checkJ = 31;
+                } else if (newJ > 31) {
+                    targetChunk = getChunk([chunk.coord[0], chunk.coord[1] + 1]);  // Move down
                     checkJ = 0;
                 }
 
-                // Handle diagonal neighbors correctly
+                // Handle diagonal neighbors
                 if (newI < 0 && newJ < 0) {
-                    targetChunk = getChunk([chunk.coord[0] - 1, chunk.coord[1] - 1]);
-                    checkI = chunkSize - 1;
-                    checkJ = chunkSize - 1;
-                } else if (newI < 0 && newJ > chunkSize - 1) {
-                    targetChunk = getChunk([chunk.coord[0] - 1, chunk.coord[1] + 1]);
-                    checkI = chunkSize - 1;
+                    targetChunk = getChunk([chunk.coord[0] - 1, chunk.coord[1] - 1]);  // Up-left
+                    checkI = 31;
+                    checkJ = 31;
+                } else if (newI < 0 && newJ > 31) {
+                    targetChunk = getChunk([chunk.coord[0] - 1, chunk.coord[1] + 1]);  // Down-left
+                    checkI = 31;
                     checkJ = 0;
-                } else if (newI > chunkSize - 1 && newJ < 0) {
-                    targetChunk = getChunk([chunk.coord[0] + 1, chunk.coord[1] - 1]);
+                } else if (newI > 31 && newJ < 0) {
+                    targetChunk = getChunk([chunk.coord[0] + 1, chunk.coord[1] - 1]);  // Up-right
                     checkI = 0;
-                    checkJ = chunkSize - 1;
-                } else if (newI > chunkSize - 1 && newJ > chunkSize - 1) {
-                    targetChunk = getChunk([chunk.coord[0] + 1, chunk.coord[1] + 1]);
+                    checkJ = 31;
+                } else if (newI > 31 && newJ > 31) {
+                    targetChunk = getChunk([chunk.coord[0] + 1, chunk.coord[1] + 1]);  // Down-right
                     checkI = 0;
                     checkJ = 0;
                 }
 
-                if (targetChunk && targetChunk.grid[checkI][checkJ] !== 0) {
-                    neighbors.push(targetChunk.grid[checkI][checkJ]);
+                if (targetChunk && targetChunk.grid[checkI][checkJ] === type) {
+                    neighbors.push(type);
                 }
             }
 
@@ -488,24 +488,22 @@
                         S: Array(9).fill().map(() => [])   // Initialize 9 empty arrays
                     }))
                 },
-                grid: Array(chunkSize).fill().map(() => Array(chunkSize).fill(0)),  
-                newGrid: Array(chunkSize).fill().map(() => Array(chunkSize).fill(0)),  
+                grid: Array(32).fill().map(() => Array(32).fill(0)),  // Single 32x32 grid
                 stones: []
             };
 
-            // Add 6 random stones of random type, with prevalence of smaller types closer to origin
+            // Add 10 random stones of type 1
             // Calculate distance from origin chunk [0,0]
             let distance = Math.floor(Math.sqrt(coord[0] * coord[0] + coord[1] * coord[1]));
-            for (let i = 0; i < 6; i++) {
+            for (let i = 0; i < 10; i++) {
                 let x, y;
                 do {
-                    x = Math.floor(Math.random() * chunkSize);
-                    y = Math.floor(Math.random() * chunkSize);
-                    type = Math.floor(Math.random() * Math.min(distance * 0.25, 6)) + 1;
+                    x = Math.floor(Math.random() * 32);
+                    y = Math.floor(Math.random() * 32);
                 } while (chunk.grid[x][y] !== 0 || 
                         chunk.stones.some(s => s[1] === x && s[2] === y));
                 
-                chunk.stones.push([type, x, y]);
+                chunk.stones.push([1, x, y]);
             }
 
             return chunk;
@@ -521,6 +519,7 @@
             // Store active chunk coordinates at the start
             activeChunk = chunk.coord;
             
+            console.log('Opening board for chunk:', chunk.coord);
             
             const overlay = document.getElementById('board-overlay');
             const board = document.getElementById('board');
@@ -657,6 +656,7 @@
             // Scale based on zoom
             ctx.scale(cameraZoom, cameraZoom);
             
+            const chunkSize = 32;
             const cellSize = 20;
             
             // Calculate visible area in world coordinates
@@ -687,6 +687,7 @@
 
         function drawChunk(chunk, offsetX, offsetY) {
             const cellSize = 20;
+            const chunkSize = 32;
 
             // Draw chunk border - make it white and thicker
             ctx.strokeStyle = '#fff';  // White color for chunk border
@@ -776,6 +777,7 @@
         }
 
         function saveGameState() {
+            console.log('Saving state. All chunks:', chunks);
             localStorage.setItem('gameState', JSON.stringify({
                 chunks: chunks,
                 bagOfStones: bagOfStones
@@ -783,6 +785,7 @@
             
             // Verify save
             const savedState = JSON.parse(localStorage.getItem('gameState'));
+            console.log('Verified saved state:', savedState);
         }
 
         function getChunkAtCoordinates(x, y) {
@@ -856,6 +859,7 @@
             dragStart.y = e.clientY - cameraOffset.y;
             mouseDownPos.x = e.clientX;
             mouseDownPos.y = e.clientY;
+            console.log('Mouse Down at:', mouseDownPos);
         }
 
         function onPointerUp(e) {
@@ -865,6 +869,10 @@
             const dx = Math.abs(e.clientX - mouseDownPos.x);
             const dy = Math.abs(e.clientY - mouseDownPos.y);
             const movedDistance = Math.sqrt(dx * dx + dy * dy);
+
+            console.log('Mouse Up at:', { x: e.clientX, y: e.clientY });
+            console.log('Total distance moved:', movedDistance);
+            console.log('Is this a click?', movedDistance < CLICK_DISTANCE_THRESHOLD);
 
             // If barely moved, treat as a click
             if (movedDistance < CLICK_DISTANCE_THRESHOLD) {
@@ -876,12 +884,16 @@
                 const worldX = (mouseX - cameraOffset.x) / cameraZoom;
                 const worldY = (mouseY - cameraOffset.y) / cameraZoom;
                 
+                console.log('Converting to world coordinates:', { worldX, worldY });
                 
                 const chunkCoords = getChunkCoordinates(worldX, worldY);
+                console.log('Chunk coordinates:', chunkCoords);
                 
                 const chunk = getChunk(chunkCoords);
+                console.log('Found chunk:', chunk ? 'yes' : 'no');
                 
                 if (chunk) {
+                    console.log('Opening board for chunk:', chunk.coord);
                     isAutoplay = false;
                     showBoard(chunk);
                 }
@@ -898,6 +910,7 @@
 
         // Helper function to get chunk coordinates
         function getChunkCoordinates(x, y) {
+            const chunkSize = 32;
             const cellSize = 20;
             
             const chunkX = Math.floor(x / (chunkSize * cellSize));
@@ -977,6 +990,7 @@
 
         // Add new function to handle stone selection
         function handleStoneSelection(e) {
+            console.log('handleStoneSelection called');
             const stone = e.target;
             const stoneType = parseInt(stone.dataset.type);
             activeStone = stoneType;
@@ -987,15 +1001,18 @@
             });
             stone.classList.add('selected');
             
+            console.log('Selected stone type:', stoneType);
         }
 
         // Add new function to handle board clicks
         function handleBoardClick(e) {
+            console.log('Board clicked', e.target);
             const target = e.target;
             const chunk = getChunk(activeChunk);
             
             // Handle stone removal
             if (target.classList.contains('stone')) {
+                console.log('Removing stone');
                 const stoneType = parseInt(target.dataset.type);
                 bagOfStones.push(stoneType); // Add stone back to bag
                 
@@ -1118,6 +1135,7 @@
         }
 
         function initializeBoardStones() {
+            console.log('Initializing board stones...');
             
             // Find the section that contains "Available Stones:"
             const sections = document.querySelectorAll('.section');
@@ -1131,6 +1149,7 @@
                 return;
             }
             
+            console.log('Found available stones container:', availableStones);
             
             // Clear existing content except the header
             const header = availableStones.querySelector('div:first-child');
@@ -1154,6 +1173,7 @@
                 stone.style.backgroundColor = getColorForType(parseInt(type));
                 stone.dataset.type = type;
                 stone.addEventListener('click', (e) => {
+                    console.log('Stone clicked:', type);
                     handleStoneSelection(e);
                 });
                 
@@ -1176,6 +1196,7 @@
             if (board) {
                 board.removeEventListener('click', handleBoardClick);
                 board.addEventListener('click', handleBoardClick);
+                console.log('Board click handler attached');
             }
         }
     </script>
